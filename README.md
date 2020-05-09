@@ -6,7 +6,7 @@ Just a few lines of training code in Rust.
 
 ```
 cargo run -- --help
-httprequester 1.0
+yadisk-client 1.0
 Mikhail B. <m@mdbx.ru>
 Does some things with Yandex Disk
 
