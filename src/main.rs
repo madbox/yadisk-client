@@ -26,7 +26,7 @@ fn parse_json_to_dir_list(r:reqwest::blocking::Response) -> Vec<String> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    let matches = App::new("httprequester")
+    let matches = App::new("yadisk-client")
                             .version("1.0")
                             .author("Mikhail B. <m@mdbx.ru>")
                             .about("Does some things with Yandex Disk")

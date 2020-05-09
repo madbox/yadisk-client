@@ -4,6 +4,8 @@ Yandex disk client in Rust
 Rust language studying project.
 Just a few lines of training code in Rust.
 
+CLI usage:
+
 ```
 cargo run -- --help
 yadisk-client 1.0
