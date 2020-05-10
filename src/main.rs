@@ -5,23 +5,19 @@ extern crate mime;
 use std::str::FromStr;
 use mime::Mime;
 extern crate serde_json;
-use serde_json::Value;
 
 fn parse_json_to_dir_list(r:reqwest::blocking::Response) -> Vec<String> {
-    // TODO Parse JSON responce and put file names into this vector
-    let xs = vec!["1i32".to_string(),
-                      "2".to_string(),
-                      "3".to_string()];
-                      
-    let s: String = r.text().unwrap();
+    // FIXME refactor without unwraps
 
-    println!("Inside parse: {:#?}", s);
-    // let rr: &reqwest::blocking::Response = &r;
-    let j = serde_json::from_str::<Value>(&s);
+    let j: serde_json::Value = r.json().unwrap();
 
-    println!("JSON: {:#?}", j);
-
-    xs
+    let items = j["_embedded"]["items"].as_array().unwrap();
+    
+    items.into_iter()
+        .map(|o| o.get("name")
+                    .unwrap()
+                    .to_string())
+        .collect()
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -54,26 +50,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .header(reqwest::header::AUTHORIZATION, format!("OAuth {}", oauth_token))
         .send()?;
 
-    println!("Responce status: {:#?}", resp.status());
-
-    let media_type_1 = match resp.headers().get(reqwest::header::CONTENT_TYPE) {
-        None => {
-            println!("The response does not contain a Content-Type header.");
-            None
-        }
-        Some(content_type) => {
+    match (resp.status(), resp.headers().get(reqwest::header::CONTENT_TYPE)) {
+        (reqwest::StatusCode::OK, Some(content_type)) => {
             let content_type = Mime::from_str(content_type.to_str()?)?;
-            let media_type = match (content_type.type_(), content_type.subtype()) {
-                (mime::APPLICATION, mime::JSON) => { parse_json_to_dir_list(resp); "a JSON document" },
-                _ => "neither text nor image",
+            match (content_type.type_(), content_type.subtype()) {
+                (mime::APPLICATION, mime::JSON) => println!("Root dir contents:\n{}", parse_json_to_dir_list(resp).join(",\n")),
+                _ => println!("The reponse contains {:#?}.", (content_type.type_(), content_type.subtype())),
             };
 
-            println!("The reponse contains {}.", media_type);
-            Some(media_type)
+            Ok(())
         }
-    };
-
-    println!("The reponse contains {}.", media_type_1.unwrap());
-
-    Ok(())
+        (_, _) => {
+            println!("The response status isn't OK or has no CONTENT-TYPE header.\nResponce STATUS:{}. Headers({:#?})", resp.status(), resp.headers());
+            Err("Error while fetching directory list via API".into())
+        }
+    }
 }
