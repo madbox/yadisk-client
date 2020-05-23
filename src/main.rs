@@ -1,5 +1,5 @@
 extern crate clap;
-use clap::{Arg, App};
+use clap::{Arg, App, SubCommand};
 
 extern crate mime;
 use std::str::FromStr;
@@ -20,31 +20,14 @@ fn parse_json_to_dir_list(r:reqwest::blocking::Response) -> Vec<String> {
         .collect()
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn get_last(_url: &str, _oauth_token: &str) -> Result<(), Box<dyn std::error::Error>>{
+    println!("Under construction!");
+    Ok(())
+}
 
-    let matches = App::new("yadisk-client")
-                            .version("1.0")
-                            .author("Mikhail B. <m@mdbx.ru>")
-                            .about("Does some things with Yandex Disk")
-                            .arg(Arg::with_name("oauth-token")
-                                .short("t")
-                                .long("oauth-token")
-                                .value_name("OAUTH_TOKEN")
-                                .help("Sets Yandex API OAuth Token https://yandex.ru/dev/oauth/doc/dg/concepts/ya-oauth-intro-docpage/")
-                                .required(true)
-                                .takes_value(true))
-                            .arg(Arg::with_name("url")
-                                .short("u")
-                                .long("url")
-                                .value_name("URL")
-                                .help("Sets a custom Yandex Disk url")
-                                .takes_value(true))
-                            .get_matches();
+fn get_list(url: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Error>>{
+    // making the request
 
-    let url = matches.value_of("url").unwrap_or("https://cloud-api.yandex.net:443/v1/disk/resources?path=%2F");
-    println!("Value for url: {}", url);
-    let oauth_token = matches.value_of("oauth-token").unwrap();
-        
     let rclient = reqwest::blocking::Client::new();
     let resp = rclient.get(url)
         .header(reqwest::header::AUTHORIZATION, format!("OAuth {}", oauth_token))
@@ -65,4 +48,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err("Error while fetching directory list via API".into())
         }
     }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    let matches = App::new("yadisk-client")
+                            .version("0.2")
+                            .author("Mikhail B. <m@mdbx.ru>")
+                            .about("Does some things with Yandex Disk")
+                            .arg(Arg::with_name("oauth-token")
+                                .short("t")
+                                .long("oauth-token")
+                                .value_name("OAUTH_TOKEN")
+                                .help("Sets Yandex API OAuth Token https://yandex.ru/dev/oauth/doc/dg/concepts/ya-oauth-intro-docpage/")
+                                .required(true)
+                                .takes_value(true))
+                            .arg(Arg::with_name("url")
+                                .short("u")
+                                .long("url")
+                                .value_name("URL")
+                                .help("Sets a custom Yandex Disk url")
+                                .takes_value(true))
+                            .subcommand(SubCommand::with_name("list")
+                                .about("Get directory listing")
+                                .arg(Arg::with_name("long")
+                                    .short("l")
+                                    .long("long")
+                                    .help("Pring additionl information on every object from list"))
+                                .arg(Arg::with_name("path")
+                                    .help("Sets the base path to fetch listing of. Default is root")
+                                    .default_value("/")
+                                    .index(1)))
+                            .subcommand(SubCommand::with_name("last")
+                                .about("Get last uploaded files"))
+                            .get_matches();
+
+    let url = matches.value_of("url").unwrap_or("https://cloud-api.yandex.net:443/v1/disk/resources?path=%2F");
+    println!("Value for url: {}", url);
+    // TODO read token from config file
+    let oauth_token = matches.value_of("oauth-token").unwrap();
+        
+    match matches.subcommand() {
+        ("list", _) => { get_list(url, oauth_token) },
+        ("last", _) => { get_last(url, oauth_token) },
+        _ => {println!("No command given. Use help please."); Ok (())}
+    }
+
+
 }
