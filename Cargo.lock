@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "yadisk-client"
-version = "0.1.0"
+version = "0.0.4"
 dependencies = [
  "clap 2.33.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "mime 0.3.16 (registry+https://github.com/rust-lang/crates.io-index)",

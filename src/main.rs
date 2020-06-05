@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::prelude::*;
 
-use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS, NON_ALPHANUMERIC};
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
 const BASE_API_URL: &'static str = "https://cloud-api.yandex.net:443/v1/disk";
 
@@ -173,31 +173,6 @@ fn get_last(url: &str, _oauth_token: &str) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
-fn parse_json_text_to_dir_list(s: &str) -> Vec<String> {
-    // FIXME refactor without unwraps
-    let j: serde_json::Value = serde_json::from_str::<serde_json::Value>(s).unwrap();
-    let items = j["_embedded"]["items"].as_array().unwrap();
-    
-    items.into_iter()
-        .map(|o| o.get("name")
-                    .unwrap()
-                    .to_string())
-        .collect()
-}
-
-fn parse_json_text_to_dir_list2(s: &str) -> Vec<String> {
-    // FIXME refactor without unwraps
-    let j: serde_json::Value = serde_json::from_str::<serde_json::Value>(s).unwrap();
-    let items = j["_embedded"]["items"].as_array().unwrap();
-    
-    items.into_iter()
-        .map(|o| o.get("name")
-                    .unwrap()
-                    .to_string())
-        .collect()
-}
-
-
 fn get_list(url: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Error>>{
     let s:String = make_api_request(url, oauth_token)?;
     let r:Resource = serde_json::from_str(s.as_str())?;
@@ -231,8 +206,8 @@ fn trim_newline(s: &mut String) {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    let mut clap = App::new("yadisk-client")
-                            .version("0.3")
+    let matches = App::new("yadisk-client")
+                            .version("0.0.4")
                             .author("Mikhail B. <m@mdbx.ru>")
                             .about("Does some things with Yandex Disk")
                             .arg(Arg::with_name("oauth-token")
@@ -276,11 +251,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .subcommand(SubCommand::with_name("unpublish")
                                 .about("Unpublish directory"))
                             .subcommand(SubCommand::with_name("token")
-                                .about("Get OAuth token"));
-    // println!("ddd: {}", clap.p.opts.first().unwrap().s.long.unwrap());
+                                .about("Get OAuth token"))
+                                .get_matches();
 
-    let matches = clap.get_matches();
-    
     let mut oauth_token = String::new();
 
     //
