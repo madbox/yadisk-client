@@ -14,7 +14,7 @@ use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 extern crate colored;
 use colored::*;
 
-const BASE_API_URL: &'static str = "https://cloud-api.yandex.net:443/v1/disk";
+const BASE_API_URL: &str = "https://cloud-api.yandex.net:443/v1/disk";
 
 mod data_structures;
 use data_structures::*;
