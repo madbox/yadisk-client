@@ -3,10 +3,8 @@ use clap::{Arg, App, SubCommand};
 
 extern crate mime;
 use std::str::FromStr;
-use std::collections::HashMap;
 use mime::Mime;
 extern crate serde_json;
-use serde::{Deserialize, Serialize};
 
 use std::fs::File;
 use std::io::prelude::*;
@@ -18,130 +16,8 @@ use colored::*;
 
 const BASE_API_URL: &'static str = "https://cloud-api.yandex.net:443/v1/disk";
 
-//
-// Disk
-//
-
-#[derive(Serialize, Deserialize, Debug)]
-struct YaUser {
-    country: String,
-    login: String,
-    display_name: String,
-    uid: String
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct YaDisk {
-    unlimited_autoupload_enabled: bool,
-    max_file_size: u64,
-    total_space: u64,
-    trash_size: u64,
-    is_paid: bool,
-    used_space: u64,
-    system_folders: HashMap<String, String>,
-    user: YaUser,
-    revision: u64
-}
-
-//
-// Resource
-//
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Resource {
-    #[serde(default)]
-    antivirus_status: String, // (undefined, optional): <Статус проверки антивирусом>,
-    #[serde(default)]
-    resource_id: String, // (string, optional): <Идентификатор ресурса>,
-    #[serde(default)]
-    share: serde_json::Value, // (ShareInfo, optional): <Информация об общей папке>,
-    #[serde(default)]
-    file: String, // (string, optional): <URL для скачивания файла>,
-    #[serde(default)]
-    size: u64, // (integer, optional): <Размер файла>,
-    #[serde(default)]
-    photoslice_time: String, // (string, optional): <Дата создания фото или видео файла>,
-    #[serde(default)]
-    _embedded: ResourceList, // (ResourceList, optional): <Список вложенных ресурсов>,
-    exif: Exif, // (Exif, optional): <Метаданные медиафайла (EXIF)>,
-    #[serde(default)]
-    custom_properties: serde_json::Value, // (object, optional): <Пользовательские атрибуты ресурса>,
-    #[serde(default)]
-    media_type: String, // (string, optional): <Определённый Диском тип файла>,
-    #[serde(default)]
-    preview: String, // (string, optional): <URL превью файла>,
-    r#type: String, // (string): <Тип>,
-    #[serde(default)]
-    mime_type: String, // (string, optional): <MIME-тип файла>,
-    #[serde(default)]
-    revision: u64, // (integer, optional): <Ревизия Диска в которой этот ресурс был изменён последний раз>,
-    #[serde(default)]
-    public_url: String, // (string, optional): <Публичный URL>,
-    path: String, // (string): <Путь к ресурсу>,
-    #[serde(default)]
-    md5: String, // (string, optional): <MD5-хэш>,
-    #[serde(default)]
-    public_key: String, // (string, optional): <Ключ опубликованного ресурса>,
-    #[serde(default)]
-    sha256: String, // (string, optional): <SHA256-хэш>,
-    name: String, // (string): <Имя>,
-    created: String, // (string): <Дата создания>,
-    modified: String, // (string): <Дата изменения>,
-    #[serde(default)]
-    comment_ids: serde_json::Value // (CommentIds, optional): <Идентификаторы комментариев>
-}
-
-impl Default for ResourceList {
-    fn default() -> Self {
-        ResourceList {
-            sort: String::from("_Uninitialized"),
-            items: Vec::new(),
-            limit: 0,
-            offset: 0,
-            path: String::from("_Uninitialized"),
-            total: 0
-        }
-    }
-}
-
-/*
-#[derive(Serialize, Deserialize, Debug)]
-struct ShareInfo {
-    is_root: bool, // (boolean, optional): <Признак того, что папка является корневой в группе>,
-    is_owned: bool, // (boolean, optional): <Признак, что текущий пользователь является владельцем общей папки>,
-    rights: String // (string): <Права доступа>
-}
-*/
-
-#[derive(Serialize, Deserialize, Debug)]
-struct ResourceList {
-    #[serde(default)]
-    sort: String, // (string, optional): <Поле, по которому отсортирован список>,
-    items: Vec<Resource>, // (array[Resource]): <Элементы списка>,
-    #[serde(default)]
-    limit: u64, // (integer, optional): <Количество элементов на странице>,
-    #[serde(default)]
-    offset: u64, // (integer, optional): <Смещение от начала списка>,
-    #[serde(default)]
-    path: String, // (string): <Путь к ресурсу, для которого построен список>,
-    #[serde(default)]
-    total: u64, // (integer, optional): <Общее количество элементов в списке>
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Exif {
-    #[serde(default)]
-    date_time: String, // (string, optional): <Дата съёмки.>
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct CommentIds {
-    #[serde(default)]
-    private_resource: String, // (string, optional): <Идентификатор комментариев для приватных ресурсов.>,
-    #[serde(default)]
-    public_resource: String // (string, optional): <Идентификатор комментариев для публичных ресурсов.>
-} 
-
+mod data_structures;
+use data_structures::*;
 
 fn make_api_request(url: &str, oauth_token: &str) -> Result<String, Box<dyn std::error::Error>> {
     println!("Making API request: {}", url.blue());
@@ -183,16 +59,14 @@ fn get_last(url: &str, oauth_token: &str, limit: u64) -> Result<(), Box<dyn std:
 
     println!("Last content:\n{}",
                  rl.items.iter()
-                    .map(|x| format!(" ↳ ({}) {}, Type: {}, CTime: {}, MTime: {}",
+                    .map(|x| format!(" ↳ ({}) {:30} Type: {} CTime: {} MTime: {}",
                                      x.r#type.bright_black(),
                                      x.name.blue(), 
-                                     x.media_type.yellow(), 
+                                     x.media_type.bright_yellow(), 
                                      x.created.bright_black(), 
                                      x.modified.bright_black()))
                     .collect::<Vec<String>>().join("\n"));
-                  
-    println!("\n{:?}", rl);
-
+                
     Ok(())
 }
 
@@ -212,10 +86,10 @@ fn get_list(url: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Erro
     if r.r#type == "dir" { 
         println!("Directory content:\n{}",
                  r._embedded.items.iter()
-                  .map(|x| format!(" ↳ ({}) {}, Type: {}, CTime: {}, MTime: {}",
+                  .map(|x| format!(" ↳ ({}) {:30} Type: {} CTime: {} MTime: {}",
                                    x.r#type.bright_black(),
                                    x.name.blue(), 
-                                   x.media_type.yellow(), 
+                                   x.media_type.bright_yellow(), 
                                    x.created.bright_black(), 
                                    x.modified.bright_black()))
                   .collect::<Vec<String>>().join("\n"));
