@@ -13,6 +13,9 @@ use std::io::prelude::*;
 
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
+extern crate colored;
+use colored::*;
+
 const BASE_API_URL: &'static str = "https://cloud-api.yandex.net:443/v1/disk";
 
 //
@@ -112,11 +115,16 @@ struct ShareInfo {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ResourceList {
+    #[serde(default)]
     sort: String, // (string, optional): <Поле, по которому отсортирован список>,
     items: Vec<Resource>, // (array[Resource]): <Элементы списка>,
+    #[serde(default)]
     limit: u64, // (integer, optional): <Количество элементов на странице>,
+    #[serde(default)]
     offset: u64, // (integer, optional): <Смещение от начала списка>,
+    #[serde(default)]
     path: String, // (string): <Путь к ресурсу, для которого построен список>,
+    #[serde(default)]
     total: u64, // (integer, optional): <Общее количество элементов в списке>
 }
 
@@ -136,7 +144,7 @@ struct CommentIds {
 
 
 fn make_api_request(url: &str, oauth_token: &str) -> Result<String, Box<dyn std::error::Error>> {
-    println!("Making API request: {}", url);
+    println!("Making API request: {}", url.blue());
     println!("Token: {:?}", oauth_token);
     let rclient = reqwest::blocking::Client::new();
     let resp = rclient.get(url)
@@ -167,9 +175,24 @@ fn get_info(url: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-fn get_last(url: &str, _oauth_token: &str) -> Result<(), Box<dyn std::error::Error>>{
+fn get_last(url: &str, oauth_token: &str, limit: u64) -> Result<(), Box<dyn std::error::Error>>{
     println!("Url for get_last: {}", url);
-    println!("Under construction!");
+    
+    let s:String = make_api_request(url, oauth_token)?;
+    let rl:ResourceList = serde_json::from_str(s.as_str())?;
+
+    println!("Last content:\n{}",
+                 rl.items.iter()
+                    .map(|x| format!(" ↳ ({}) {}, Type: {}, CTime: {}, MTime: {}",
+                                     x.r#type.bright_black(),
+                                     x.name.blue(), 
+                                     x.media_type.yellow(), 
+                                     x.created.bright_black(), 
+                                     x.modified.bright_black()))
+                    .collect::<Vec<String>>().join("\n"));
+                  
+    println!("\n{:?}", rl);
+
     Ok(())
 }
 
@@ -189,7 +212,12 @@ fn get_list(url: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Erro
     if r.r#type == "dir" { 
         println!("Directory content:\n{}",
                  r._embedded.items.iter()
-                  .map(|x| [" ↳ (", &x.r#type, ") ", &x.name, ": ", &x.media_type].concat())
+                  .map(|x| format!(" ↳ ({}) {}, Type: {}, CTime: {}, MTime: {}",
+                                   x.r#type.bright_black(),
+                                   x.name.blue(), 
+                                   x.media_type.yellow(), 
+                                   x.created.bright_black(), 
+                                   x.modified.bright_black()))
                   .collect::<Vec<String>>().join("\n"));
     }
     Ok(())
@@ -236,6 +264,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .takes_value(true))
                             .subcommand(SubCommand::with_name("info")
                                 .about("Get general information about yandex disk account"))
+                            .subcommand(SubCommand::with_name("last")
+                                .about("Get last uploaded file list"))
                             .subcommand(SubCommand::with_name("list")
                                 .about("Get directory listing")
                                 .arg(Arg::with_name("long")
@@ -251,7 +281,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .subcommand(SubCommand::with_name("unpublish")
                                 .about("Unpublish directory"))
                             .subcommand(SubCommand::with_name("token")
-                                .about("Get OAuth token"))
+                                .about("Get OAuth token proccedure. You will get URL to Yandex OAuth page")
+                                .arg(Arg::with_name("newtoken")
+                                    .help("Set new OAuth token. Token will be written to config file")
+                                    .index(1)))
                                 .get_matches();
 
     let mut oauth_token = String::new();
@@ -271,13 +304,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(_) => println!("Error reading file"),
         }
 
-        // Note: this lets us override the config file value with the
-        // cli argument, if provided
-        if matches.occurrences_of("oauth-token") > 0 {
-            oauth_token = matches.value_of("oauth-token").unwrap().to_string();
-        }
-    } else {
+
+    } 
+
+    // Note: this lets us override the config file value with the
+    // cli argument, if provided
+    if matches.occurrences_of("oauth-token") > 0 {
         oauth_token = matches.value_of("oauth-token").unwrap().to_string();
+    }
+
+    // FIXME some magic number for fast check
+    // Convenient conf check should be implemented
+    if oauth_token.len() < 5 { 
+        return Err(String::from("No configuration provided").into());
     }
 
     println!("OAuth token: {}", oauth_token);
@@ -294,7 +333,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             get_list([url,"/resources?path=", &path].concat().as_str(),
                      oauth_token.as_str())
         },
-        ("last", _) => { get_last([url,"/resources/last-uploaded?limit=5"].concat().as_str(), oauth_token.as_str()) },
+        ("last", _) => { get_last([url,"/resources/last-uploaded?limit=5"].concat().as_str(), oauth_token.as_str(), 5) },
         ("info", _) => { get_info(url, oauth_token.as_str()) },
         _ => {println!("No known command given. Use help please."); Ok (())}
     }

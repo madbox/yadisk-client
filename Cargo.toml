@@ -12,3 +12,4 @@ mime = { version = ">=0.3.16" }
 serde_json = { version = ">=1.0.52" }
 serde = { version = ">=1", features = ["derive"]}
 percent-encoding = ">=2.1"
+colored = "2"
