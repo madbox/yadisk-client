@@ -51,7 +51,7 @@ fn get_info(url: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-fn get_last(url: &str, oauth_token: &str, limit: u64) -> Result<(), Box<dyn std::error::Error>>{
+fn get_last(url: &str, oauth_token: &str, _limit: u64) -> Result<(), Box<dyn std::error::Error>>{
     println!("Url for get_last: {}", url);
     
     let s:String = make_api_request(url, oauth_token)?;
