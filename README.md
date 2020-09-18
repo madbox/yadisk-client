@@ -27,10 +27,12 @@ OPTIONS:
     -u, --url <URL>                    Sets a custom Yandex Disk url
 
 SUBCOMMANDS:
+    download     Download single file
     help         Prints this message or the help of the given subcommand(s)
     info         Get general information about yandex disk account
+    last         Get last uploaded file list
     list         Get directory listing
     publish      Publish directory and get link to STDOUT
-    token        Get OAuth token
+    token        Get OAuth token proccedure. You will get URL to Yandex OAuth page
     unpublish    Unpublish directory
 ```
