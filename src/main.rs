@@ -5,7 +5,7 @@ extern crate mime;
 use std::str::FromStr;
 use mime::Mime;
 
-use url::{Url, ParseError};
+use url::{Url};
 
 extern crate serde_json;
 
@@ -20,7 +20,6 @@ extern crate colored;
 use colored::*;
 
 const BASE_API_URL: &str = "https://cloud-api.yandex.net:443/v1/disk";
-const BASE_API_RESOURCES_URL: &str = "https://cloud-api.yandex.net:443/v1/disk/resources";
 
 mod data_structures;
 use data_structures::*;
@@ -57,10 +56,8 @@ fn get_info(url: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-fn get_last(url: &str, oauth_token: &str, _limit: u64) -> Result<(), Box<dyn std::error::Error>>{
-    println!("Url for get_last: {}", url);
-    
-    let s:String = make_api_request(url, oauth_token)?;
+fn get_last(url: &str, oauth_token: &str, limit: u64) -> Result<(), Box<dyn std::error::Error>>{
+    let s:String = make_api_request(format!("{}/resources/last-uploaded?limit={}", url, limit).as_str(), oauth_token)?;
     let rl:ResourceList = serde_json::from_str(s.as_str())?;
 
     println!("Last content:\n{}",
@@ -76,8 +73,8 @@ fn get_last(url: &str, oauth_token: &str, _limit: u64) -> Result<(), Box<dyn std
     Ok(())
 }
 
-fn get_list(url: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Error>>{
-    let s:String = make_api_request(url, oauth_token)?;
+fn get_list(url: &str, oauth_token: &str, path: &str) -> Result<(), Box<dyn std::error::Error>>{
+    let s:String = make_api_request(format!("{}/resources?path={}", url, path).as_str(), oauth_token)?;
     let r:Resource = serde_json::from_str(s.as_str())?;
 
     println!("Name: {}\n\
@@ -103,8 +100,8 @@ fn get_list(url: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-fn download_file(path: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let s:String = make_api_request([BASE_API_RESOURCES_URL, "/download?path=", path].concat().as_str(), oauth_token)?;
+fn download_file(url: &str, oauth_token: &str, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let s:String = make_api_request([url, "/resources/download?path=", path].concat().as_str(), oauth_token)?;
     let di:DownloadInfo = serde_json::from_str(s.as_str())?;
 
     println!("{:#?}", di);
@@ -173,13 +170,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .subcommand(SubCommand::with_name("info")
                                 .about("Get general information about yandex disk account"))
                             .subcommand(SubCommand::with_name("last")
-                                .about("Get last uploaded file list"))
+                                .about("Get last uploaded file list")
+                                .arg(Arg::with_name("limit")
+                                    .short("l")
+                                    .long("limit")
+                                    .default_value("5")))
                             .subcommand(SubCommand::with_name("download")
                                 .about("Download single file")
-                                .arg(Arg::with_name("long")
-                                    .short("d")
-                                    .long("download")
-                                    .help("Pring additionl information on every object from list"))
                                 .arg(Arg::with_name("path")
                                     .help("File name with full path to download")
                                     .index(1)))
@@ -247,10 +244,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                   .value_of("path")
                                                   .unwrap(), NON_ALPHANUMERIC
                                           ).to_string();
-            get_list([url,"/resources?path=", &path].concat().as_str(),
-                     oauth_token.as_str())
+            get_list(url, oauth_token.as_str(), &path)
         },
-        ("last", _) => { get_last([url,"/resources/last-uploaded?limit=5"].concat().as_str(), oauth_token.as_str(), 5) },
+        ("last", _) => { get_last(url, oauth_token.as_str(), matches.subcommand_matches("last").unwrap().value_of("limit").unwrap().to_string().parse::<u64>().unwrap()) },
         ("info", _) => { get_info(url, oauth_token.as_str()) },
         ("download", _) => { 
             let path = utf8_percent_encode(matches.subcommand_matches("download")
@@ -258,7 +254,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                   .value_of("path")
                                                   .unwrap(), NON_ALPHANUMERIC
                                           ).to_string();
-            download_file(&path, oauth_token.as_str())
+            download_file(url, oauth_token.as_str(), &path)
          },
         _ => {println!("No known command given. Use help please."); Ok (())}
     }
