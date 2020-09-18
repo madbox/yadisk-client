@@ -100,27 +100,29 @@ fn get_list(url: &str, oauth_token: &str, path: &str) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-fn download_file(url: &str, oauth_token: &str, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let s:String = make_api_request([url, "/resources/download?path=", path].concat().as_str(), oauth_token)?;
+fn download_file(url: &str, oauth_token: &str, path: &str, target_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Attempting to download:\nRemote:{}\nTo:{}", path, target_path.unwrap_or_default());
+    let s:String = make_api_request([url, "/resources/download?path=", utf8_percent_encode(path, NON_ALPHANUMERIC).to_string().as_str()].concat().as_str(), oauth_token)?;
     let di:DownloadInfo = serde_json::from_str(s.as_str())?;
 
-    println!("{:#?}", di);
+    
 
     let rclient = reqwest::blocking::Client::new();
     let mut resp = rclient.get(&di.href)
         .header(reqwest::header::AUTHORIZATION, format!("OAuth {}", oauth_token))
         .send()?;
 
-
     if resp.status() == reqwest::StatusCode::OK {
-        println!("OK. Data size: {}", resp.headers().get("content-length").unwrap().to_str()?);
+        println!("Download request done. Data size: {}", resp.headers().get("content-length").unwrap().to_str()?);
         
         let parsed = Url::parse(&di.href)?;
         let filename = parsed.query_pairs().find(|(x,_y)| x=="filename").unwrap().1.to_string();
+        let target = target_path.or(Some(filename.as_str())).unwrap();
 
-        let mut out = File::create(filename).expect("failed to create file");
+        println!("Saving as {}", target);
+
+        let mut out = File::create(target).expect("failed to create file");
         io::copy(&mut resp, &mut out).expect("failed to copy content");
-
     } else {
         println!("--Responce status is not OK");
     }
@@ -179,7 +181,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .about("Download single file")
                                 .arg(Arg::with_name("path")
                                     .help("File name with full path to download")
-                                    .index(1)))
+                                    .index(1))
+                                .arg(Arg::with_name("target")
+                                    .help("Target path file will be saved to")
+                                    .index(2)))
                             .subcommand(SubCommand::with_name("list")
                                 .about("Get directory listing")
                                 .arg(Arg::with_name("long")
@@ -242,19 +247,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let path = utf8_percent_encode(matches.subcommand_matches("list")
                                                   .unwrap()
                                                   .value_of("path")
-                                                  .unwrap(), NON_ALPHANUMERIC
+                                                  .unwrap_or_default(), NON_ALPHANUMERIC
                                           ).to_string();
             get_list(url, oauth_token.as_str(), &path)
         },
         ("last", _) => { get_last(url, oauth_token.as_str(), matches.subcommand_matches("last").unwrap().value_of("limit").unwrap().to_string().parse::<u64>().unwrap()) },
         ("info", _) => { get_info(url, oauth_token.as_str()) },
         ("download", _) => { 
-            let path = utf8_percent_encode(matches.subcommand_matches("download")
+            let path = matches.subcommand_matches("download")
                                                   .unwrap()
                                                   .value_of("path")
-                                                  .unwrap(), NON_ALPHANUMERIC
-                                          ).to_string();
-            download_file(url, oauth_token.as_str(), &path)
+                                                  .unwrap_or_default();
+            let target_path = matches.subcommand_matches("download")
+                                                  .unwrap()
+                                                  .value_of("target")
+                                                  .unwrap_or_default();
+            download_file(url, oauth_token.as_str(), &path, Some(&target_path))
          },
         _ => {println!("No known command given. Use help please."); Ok (())}
     }
