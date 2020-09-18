@@ -4,10 +4,15 @@ use clap::{Arg, App, SubCommand};
 extern crate mime;
 use std::str::FromStr;
 use mime::Mime;
+
+use url::{Url, ParseError};
+
 extern crate serde_json;
 
 use std::fs::File;
 use std::io::prelude::*;
+use std::io;
+
 
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
@@ -15,6 +20,7 @@ extern crate colored;
 use colored::*;
 
 const BASE_API_URL: &str = "https://cloud-api.yandex.net:443/v1/disk";
+const BASE_API_RESOURCES_URL: &str = "https://cloud-api.yandex.net:443/v1/disk/resources";
 
 mod data_structures;
 use data_structures::*;
@@ -97,6 +103,34 @@ fn get_list(url: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+fn download_file(path: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let s:String = make_api_request([BASE_API_RESOURCES_URL, "/download?path=", path].concat().as_str(), oauth_token)?;
+    let di:DownloadInfo = serde_json::from_str(s.as_str())?;
+
+    println!("{:#?}", di);
+
+    let rclient = reqwest::blocking::Client::new();
+    let mut resp = rclient.get(&di.href)
+        .header(reqwest::header::AUTHORIZATION, format!("OAuth {}", oauth_token))
+        .send()?;
+
+
+    if resp.status() == reqwest::StatusCode::OK {
+        println!("OK. Data size: {}", resp.headers().get("content-length").unwrap().to_str()?);
+        
+        let parsed = Url::parse(&di.href)?;
+        let filename = parsed.query_pairs().find(|(x,_y)| x=="filename").unwrap().1.to_string();
+
+        let mut out = File::create(filename).expect("failed to create file");
+        io::copy(&mut resp, &mut out).expect("failed to copy content");
+
+    } else {
+        println!("--Responce status is not OK");
+    }
+
+    Ok(())
+}
+
 fn trim_newline(s: &mut String) {
     if s.ends_with('\n') {
         s.pop();
@@ -140,6 +174,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .about("Get general information about yandex disk account"))
                             .subcommand(SubCommand::with_name("last")
                                 .about("Get last uploaded file list"))
+                            .subcommand(SubCommand::with_name("download")
+                                .about("Download single file")
+                                .arg(Arg::with_name("long")
+                                    .short("d")
+                                    .long("download")
+                                    .help("Pring additionl information on every object from list"))
+                                .arg(Arg::with_name("path")
+                                    .help("File name with full path to download")
+                                    .index(1)))
                             .subcommand(SubCommand::with_name("list")
                                 .about("Get directory listing")
                                 .arg(Arg::with_name("long")
@@ -209,6 +252,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         ("last", _) => { get_last([url,"/resources/last-uploaded?limit=5"].concat().as_str(), oauth_token.as_str(), 5) },
         ("info", _) => { get_info(url, oauth_token.as_str()) },
+        ("download", _) => { 
+            let path = utf8_percent_encode(matches.subcommand_matches("download")
+                                                  .unwrap()
+                                                  .value_of("path")
+                                                  .unwrap(), NON_ALPHANUMERIC
+                                          ).to_string();
+            download_file(&path, oauth_token.as_str())
+         },
         _ => {println!("No known command given. Use help please."); Ok (())}
     }
 
