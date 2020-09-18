@@ -1,4 +1,4 @@
-# yadisk-client
+# yadisk-client [![Build Status](https://travis-ci.com/madbox/yadisk-client.svg?branch=master)](https://travis-ci.com/madbox/yadisk-client)
 Yandex disk client in Rust
 
 Rust language studying project.
