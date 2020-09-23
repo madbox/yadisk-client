@@ -112,7 +112,6 @@ fn upload_file(
 
     println!("Attempting to upload:\nLocal:{}\nTo remote:{}", local_path, remote_path);
     let s:String = make_api_request(
-        
             format!(
                 "{}/resources/upload?path={}&overwrite={}",
                 url,
@@ -132,6 +131,34 @@ fn upload_file(
     println!("{:#?}", res);
 
     Ok(())
+}
+
+fn delete_remote_file(
+    url: &str,
+    oauth_token: &str,
+    remote_path: &str,
+    permanently_flag: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+
+    println!("Trying to delete: {}", remote_path.bright_yellow());
+
+    let rclient = reqwest::blocking::Client::new();
+    let resp = rclient.delete(
+        format!(
+            "{}/resources?path={}&force_async=false&permanently={}",
+            url,
+            utf8_percent_encode(remote_path, NON_ALPHANUMERIC).to_string().as_str(),
+            permanently_flag).as_str())
+        .header(reqwest::header::AUTHORIZATION, format!("OAuth {}", oauth_token))
+        .send()?;
+
+    if resp.status() == reqwest::StatusCode::OK {
+        println!("OK");
+        Ok(())
+    } else {
+        println!("--Response status is not OK\n{:#?}\n{:#?}", resp.status(), resp.text());
+        Err("Response status is not OK".to_string().into())
+    }
 }
 
 fn download_file(
@@ -237,6 +264,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     .long("overwrite")
                                     .value_name("overwrite")
                                     .default_value("false")))
+                            .subcommand(SubCommand::with_name("delete")
+                                    .about("Delete file on remote side")
+                                    .arg(Arg::with_name("remote")
+                                        .help("Remote path to delete file")
+                                        .index(1)))
                             .subcommand(SubCommand::with_name("list")
                                 .about("Get directory listing")
                                 .arg(Arg::with_name("long")
@@ -335,6 +367,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             upload_file(url, oauth_token.as_str(), &path, &remote_path, overwrite)
          },
+         ("delete", _) => {
+            let remote_path = matches.subcommand_matches("delete")
+                                                    .unwrap()
+                                                    .value_of("remote")
+                                                    .unwrap_or_default();
+            let permanently_flag = true;
+            delete_remote_file(url, oauth_token.as_str(), remote_path, permanently_flag)
+         }
         _ => {println!("No known command given. Use help please."); Ok (())}
     }
 
