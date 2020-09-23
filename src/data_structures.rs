@@ -136,3 +136,15 @@ pub struct DownloadInfo {
     pub method: String,
     pub templated: bool,
 }
+
+//
+// UploadInfo
+//
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UploadInfo {
+    pub operation_id: String,
+    pub href: String,
+    pub method: String,
+    pub templated: bool,
+}
