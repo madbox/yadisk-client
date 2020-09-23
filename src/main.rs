@@ -23,7 +23,10 @@ const BASE_API_URL: &str = "https://cloud-api.yandex.net:443/v1/disk";
 mod data_structures;
 use data_structures::*;
 
-fn make_api_request(url: &str, oauth_token: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn make_api_request(
+    url: &str,
+    oauth_token: &str
+) -> Result<String, Box<dyn std::error::Error>> {
     println!("Making API request: {}", url.blue());
     println!("Token: {:?}", oauth_token);
     let rclient = reqwest::blocking::Client::new();
@@ -41,7 +44,7 @@ fn make_api_request(url: &str, oauth_token: &str) -> Result<String, Box<dyn std:
             Err("Mime type is not application/json".to_string().into())
         }
     } else {
-        println!("--Responce status is not OK");
+        println!("--Responce status is not OK\n{:#?}", resp.status());
         Err("Responce status is not OK".to_string().into())
     }
 }
@@ -100,11 +103,12 @@ fn get_list(url: &str, oauth_token: &str, path: &str) -> Result<(), Box<dyn std:
 }
 
 fn upload_file(
-        url: &str,
-        oauth_token: &str,
-        local_path: &str, 
-        remote_path: &str
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    url: &str,
+    oauth_token: &str,
+    local_path: &str,
+    remote_path: &str,
+    overwrite_flag: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Attempting to upload:\nLocal:{}\nTo remote:{}", local_path, remote_path);
     let s:String = make_api_request(
@@ -113,7 +117,7 @@ fn upload_file(
                 "{}/resources/upload?path={}&overwrite={}",
                 url,
                 utf8_percent_encode(remote_path, NON_ALPHANUMERIC).to_string().as_str(),
-                false).as_str()
+                overwrite_flag).as_str()
         , oauth_token)?;
     let ui:UploadInfo = serde_json::from_str(s.as_str())?;
 
@@ -131,11 +135,11 @@ fn upload_file(
 }
 
 fn download_file(
-        url: &str,
-        oauth_token: &str,
-        path: &str, 
-        target_path: Option<&str>
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    url: &str,
+    oauth_token: &str,
+    path: &str, 
+    target_path: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Attempting to download:\nRemote:{}\nTo:{}", path, target_path.unwrap_or_default());
     let s:String = make_api_request([url, "/resources/download?path=", utf8_percent_encode(path, NON_ALPHANUMERIC).to_string().as_str()].concat().as_str(), oauth_token)?;
@@ -159,7 +163,7 @@ fn download_file(
         let mut out = File::create(target).expect("failed to create file");
         io::copy(&mut resp, &mut out).expect("failed to copy content");
     } else {
-        println!("--Responce status is not OK");
+        println!("--Responce status is not OK\n{:#?}", resp.status());
     }
 
     Ok(())
@@ -227,7 +231,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     .index(1))
                                 .arg(Arg::with_name("remote")
                                     .help("Remote path file will be saved to")
-                                    .index(2)))
+                                    .index(2))
+                                .arg(Arg::with_name("overwrite")
+                                    .help("Overwrite file if it already exists on remote path. true|false")
+                                    .long("overwrite")
+                                    .value_name("overwrite")
+                                    .default_value("false")))
                             .subcommand(SubCommand::with_name("list")
                                 .about("Get directory listing")
                                 .arg(Arg::with_name("long")
@@ -316,7 +325,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                   .unwrap()
                                                   .value_of("remote")
                                                   .unwrap_or_default();
-            upload_file(url, oauth_token.as_str(), &path, &remote_path)
+            let overwrite_str = matches.subcommand_matches("upload")
+                                                  .unwrap()
+                                                  .value_of("overwrite")
+                                                  .unwrap_or_default();
+            let mut overwrite = false;
+            if overwrite_str.eq_ignore_ascii_case("true") {
+                overwrite = true;
+            }
+            upload_file(url, oauth_token.as_str(), &path, &remote_path, overwrite)
          },
         _ => {println!("No known command given. Use help please."); Ok (())}
     }
