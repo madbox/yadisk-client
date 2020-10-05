@@ -1,0 +1,3 @@
+oauth_token = "some-alphanumeric-value"
+client_id = "another-alphanumeric-value"
+client_secret = "yet-another-alphanumeric-value"

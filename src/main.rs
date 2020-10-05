@@ -10,6 +10,7 @@ use url::{Url};
 extern crate serde_json;
 
 use std::fs::File;
+use std::fs;
 use std::io::prelude::*;
 use std::io;
 
@@ -23,15 +24,24 @@ const BASE_API_URL: &str = "https://cloud-api.yandex.net:443/v1/disk";
 mod data_structures;
 use data_structures::*;
 
+#[macro_use] extern crate text_io;
+mod yandex_oauth;
+
+// Configuration
+
+extern crate config;
+
+
+
 fn make_api_request(
     url: &str,
-    oauth_token: &str
+    conf: &config::Config
 ) -> Result<String, Box<dyn std::error::Error>> {
     println!("Making API request: {}", url.blue());
-    println!("Token: {:?}", oauth_token);
+    println!("Token: {:?}", conf.get_str("oauth_token")?.as_str());
     let rclient = reqwest::blocking::Client::new();
     let resp = rclient.get(url)
-        .header(reqwest::header::AUTHORIZATION, format!("OAuth {}", oauth_token))
+        .header(reqwest::header::AUTHORIZATION, format!("OAuth {}", conf.get_str("oauth_token")?.as_str()))
         .send()?;
 
     if resp.status() == reqwest::StatusCode::OK {
@@ -49,17 +59,17 @@ fn make_api_request(
     }
 }
 
-fn get_info(url: &str, oauth_token: &str) -> Result<(), Box<dyn std::error::Error>>{
+fn get_info(conf: &config::Config) -> Result<(), Box<dyn std::error::Error>>{
     let disk_object: YaDisk = serde_json::from_str(
-        make_api_request(url, oauth_token)?.as_str())?;
+        make_api_request(conf.get_str("url")?.as_str(), conf)?.as_str())?;
 
     println!("Yandex disk info:\n{:#?}", disk_object);
 
     Ok(())
 }
 
-fn get_last(url: &str, oauth_token: &str, limit: u64) -> Result<(), Box<dyn std::error::Error>>{
-    let s:String = make_api_request(format!("{}/resources/last-uploaded?limit={}", url, limit).as_str(), oauth_token)?;
+fn get_last(url: &str, conf: &config::Config, limit: u64) -> Result<(), Box<dyn std::error::Error>>{
+    let s:String = make_api_request(format!("{}/resources/last-uploaded?limit={}", url, limit).as_str(), conf)?;
     let rl:ResourceList = serde_json::from_str(s.as_str())?;
 
     println!("Last content:\n{}",
@@ -75,8 +85,8 @@ fn get_last(url: &str, oauth_token: &str, limit: u64) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-fn get_list(url: &str, oauth_token: &str, path: &str) -> Result<(), Box<dyn std::error::Error>>{
-    let s:String = make_api_request(format!("{}/resources?path={}", url, path).as_str(), oauth_token)?;
+fn get_list(url: &str, conf: &config::Config, path: &str) -> Result<(), Box<dyn std::error::Error>>{
+    let s:String = make_api_request(format!("{}/resources?path={}", url, path).as_str(), conf)?;
     let r:Resource = serde_json::from_str(s.as_str())?;
 
     println!("Name: {}\n\
@@ -104,7 +114,7 @@ fn get_list(url: &str, oauth_token: &str, path: &str) -> Result<(), Box<dyn std:
 
 fn upload_file(
     url: &str,
-    oauth_token: &str,
+    conf: &config::Config,
     local_path: &str,
     remote_path: &str,
     overwrite_flag: bool,
@@ -117,7 +127,7 @@ fn upload_file(
                 url,
                 utf8_percent_encode(remote_path, NON_ALPHANUMERIC).to_string().as_str(),
                 overwrite_flag).as_str()
-        , oauth_token)?;
+        , conf)?;
     let ui:UploadInfo = serde_json::from_str(s.as_str())?;
 
     println!("{:#?}", ui);
@@ -163,19 +173,19 @@ fn delete_remote_file(
 
 fn download_file(
     url: &str,
-    oauth_token: &str,
+    conf: &config::Config,
     path: &str, 
     target_path: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Attempting to download:\nRemote:{}\nTo:{}", path, target_path.unwrap_or_default());
-    let s:String = make_api_request([url, "/resources/download?path=", utf8_percent_encode(path, NON_ALPHANUMERIC).to_string().as_str()].concat().as_str(), oauth_token)?;
+    let s:String = make_api_request([url, "/resources/download?path=", utf8_percent_encode(path, NON_ALPHANUMERIC).to_string().as_str()].concat().as_str(), conf)?;
     let di:DownloadInfo = serde_json::from_str(s.as_str())?;
 
 
     let rclient = reqwest::blocking::Client::new();
     let mut resp = rclient.get(&di.href)
-        .header(reqwest::header::AUTHORIZATION, format!("OAuth {}", oauth_token))
+        .header(reqwest::header::AUTHORIZATION, format!("OAuth {}", conf.get_str("oauth_token")?))
         .send()?;
 
     if resp.status() == reqwest::StatusCode::OK {
@@ -208,12 +218,12 @@ fn trim_newline(s: &mut String) {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let matches = App::new("yadisk-client")
-                            .version("0.0.4")
+                            .version("0.1.0")
                             .author("Mikhail B. <m@mdbx.ru>")
                             .about("Does some things with Yandex Disk")
-                            .arg(Arg::with_name("oauth-token")
+                            .arg(Arg::with_name("oauth_token")
                                 .short("t")
-                                .long("oauth-token")
+                                .long("oauth_token")
                                 .value_name("OAUTH_TOKEN")
                                 .help("Sets Yandex API OAuth Token https://yandex.ru/dev/oauth/doc/dg/concepts/ya-oauth-intro-docpage/")
                                 .takes_value(true))
@@ -235,6 +245,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .value_name("CONFIG")
                                 .help("Get configuration from file")
                                 .takes_value(true))
+                            .subcommand(SubCommand::with_name("login")
+                                .about("Authorize this application to access Yandex Disk. You will be provided with url to grant privileges. Then you will be asked for an authorization code"))
                             .subcommand(SubCommand::with_name("info")
                                 .about("Get general information about yandex disk account"))
                             .subcommand(SubCommand::with_name("last")
@@ -296,7 +308,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load config
     //
 
+    let mut config_file_name = "ydclient.toml";
+
     if let Some(c) = matches.value_of("config") {
+        config_file_name = c;
         let file = File::open(c);
         match file {
             Ok(mut f) => {
@@ -306,25 +321,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Err(_) => println!("Error reading file"),
         }
-
-
     } 
+
+    let mut settings = config::Config::default();
+    settings
+        // Add in `./Settings.toml`
+        .merge(config::File::with_name(config_file_name)).unwrap()
+        // Add in settings from the environment (with a prefix of APP)
+        // Eg.. `APP_DEBUG=1 ./target/app` would set the `debug` key
+        .merge(config::Environment::with_prefix("YDCLIENT")).unwrap();
 
     // Note: this lets us override the config file value with the
     // cli argument, if provided
-    if matches.occurrences_of("oauth-token") > 0 {
-        oauth_token = matches.value_of("oauth-token").unwrap().to_string();
+    if matches.occurrences_of("oauth_token") > 0 {
+        settings.set("oauth_token", matches.value_of("oauth_token").unwrap().to_string())?;
     }
 
     // FIXME some magic number for fast check
     // Convenient conf check should be implemented
-    if oauth_token.len() < 5 { 
+    if settings.get_str("oauth_token")?.len() < 5 { 
         return Err(String::from("No configuration provided").into());
     }
 
-    println!("OAuth token: {}", oauth_token);
+    println!("OAuth token: {}", settings.get_str("oauth_token")?);
 
-    let url = matches.value_of("url").unwrap_or(BASE_API_URL);
+    settings.set("url", matches.value_of("url").unwrap_or(BASE_API_URL))?;
         
     match matches.subcommand() {
         ("list", _) => { 
@@ -333,10 +354,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                   .value_of("path")
                                                   .unwrap_or_default(), NON_ALPHANUMERIC
                                           ).to_string();
-            get_list(url, oauth_token.as_str(), &path)
+            get_list(settings.get_str("url")?.as_str(), &settings, &path)
         },
-        ("last", _) => { get_last(url, oauth_token.as_str(), matches.subcommand_matches("last").unwrap().value_of("limit").unwrap().to_string().parse::<u64>().unwrap()) },
-        ("info", _) => { get_info(url, oauth_token.as_str()) },
+        ("last", _) => { get_last(settings.get_str("url")?.as_str(), &settings, matches.subcommand_matches("last").unwrap().value_of("limit").unwrap().to_string().parse::<u64>().unwrap()) },
+        ("info", _) => { get_info(&settings) },
         ("download", _) => {
             let path = matches.subcommand_matches("download")
                                                   .unwrap()
@@ -346,7 +367,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                   .unwrap()
                                                   .value_of("target")
                                                   .unwrap_or_default();
-            download_file(url, oauth_token.as_str(), &path, Some(&target_path))
+            download_file(settings.get_str("url")?.as_str(), &settings, &path, Some(&target_path))
          },
          ("upload", _) => {
             let path = matches.subcommand_matches("upload")
@@ -365,7 +386,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if overwrite_str.eq_ignore_ascii_case("true") {
                 overwrite = true;
             }
-            upload_file(url, oauth_token.as_str(), &path, &remote_path, overwrite)
+            upload_file(settings.get_str("url")?.as_str(), &settings, &path, &remote_path, overwrite)
          },
          ("delete", _) => {
             let remote_path = matches.subcommand_matches("delete")
@@ -373,7 +394,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                     .value_of("remote")
                                                     .unwrap_or_default();
             let permanently_flag = true;
-            delete_remote_file(url, oauth_token.as_str(), remote_path, permanently_flag)
+            delete_remote_file(settings.get_str("url")?.as_str(), oauth_token.as_str(), remote_path, permanently_flag)
+         },
+         ("login", _) => {
+            let ti: yandex_oauth::TokenInfo = yandex_oauth::cli_auth_procedure(&settings)?;
+            fs::write("config", ti.access_token)?;
+            Ok(())
          }
         _ => {println!("No known command given. Use help please."); Ok (())}
     }

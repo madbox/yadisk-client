@@ -2,4 +2,4 @@
 **/*.rs.bk
 .history
 *.cfg
-config
+ydclient.toml
