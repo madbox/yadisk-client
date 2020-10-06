@@ -51,8 +51,9 @@ SUBCOMMANDS:
     list         Get directory listing
     login        Authorize this application to access Yandex Disk. You will be provided with url to grant
                  privileges. Then you will be asked for an authorization code
-    publish      Publish directory and get link to STDOUT
+    publish      (not implemented) Publish directory and get link to STDOUT
     token        Get OAuth token proccedure. You will get URL to Yandex OAuth page
-    unpublish    Unpublish directory
+    unpublish    (not implemented) Unpublish directory
     upload       Upload single file
+    watch        (under development) Watch some path for file events
 ```
