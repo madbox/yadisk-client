@@ -27,6 +27,9 @@ use data_structures::*;
 #[macro_use] extern crate text_io;
 mod yandex_oauth;
 
+use notify::event::EventKind::*;
+use notify::{Watcher, RecommendedWatcher, RecursiveMode};
+
 // Configuration
 
 extern crate config;
@@ -215,6 +218,44 @@ fn trim_newline(s: &mut String) {
     }
 }
 
+fn start_watch(path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Starting watch for: {}", path);
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    // Automatically select the best implementation for your platform.
+    // You can also access each implementation directly e.g. INotifyWatcher.
+    let mut watcher: RecommendedWatcher = Watcher::new_immediate(move |res| tx.send(res).unwrap())?;
+
+    // Add a path to be watched. All files and directories at that path and
+    // below will be monitored for changes.
+    watcher.watch(path, RecursiveMode::Recursive)?;
+
+    for res in rx {
+        match res {
+            Ok(event) => match event.kind {
+                Create(ck) => {
+                    println!("Create event. {:#?} : {:#?}", ck, event.paths);
+                },
+                Modify(_) => {
+                    println!("Modify event! {:#?}", event.paths);
+                },
+                Remove(_) => {
+                    println!("Remove event! {:#?}", event.paths);
+                },
+                _ => {
+                    println!("Other event! {:#?}", event);
+                }
+            },
+            Err(event) => {
+                println!("watch error: {:?}", event)
+            }
+        }
+    };
+
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let matches = App::new("yadisk-client")
@@ -299,6 +340,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .about("Get OAuth token proccedure. You will get URL to Yandex OAuth page")
                                 .arg(Arg::with_name("newtoken")
                                     .help("Set new OAuth token. Token will be written to config file")
+                                    .index(1)))
+                            .subcommand(SubCommand::with_name("watch")
+                                .about("Watch some path for file events")
+                                .arg(Arg::with_name("path")
+                                    .help("FS Path to watch")
+                                    .short("p")
+                                    .long("path")
+                                    .takes_value(true)
+                                    .required(true)
                                     .index(1)))
                                 .get_matches();
 
@@ -390,6 +440,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          },
          ("delete", _) => {
             let remote_path = matches.subcommand_matches("delete")
+            // FIXME use '?' error handling here and everywhere in this switch block
                                                     .unwrap()
                                                     .value_of("remote")
                                                     .unwrap_or_default();
@@ -399,6 +450,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          ("login", _) => {
             let ti: yandex_oauth::TokenInfo = yandex_oauth::cli_auth_procedure(&settings)?;
             fs::write("config", ti.access_token)?;
+            Ok(())
+         }
+         ("watch", _) => {
+            println!("There will be watch!");
+            let path = matches.subcommand_matches("watch")
+                            .unwrap()
+                            .value_of("path")
+                            .unwrap_or_default();
+            start_watch(path)?;
             Ok(())
          }
         _ => {println!("No known command given. Use help please."); Ok (())}
