@@ -18,16 +18,16 @@ pub mod yandex_disk_oauth;
 
 pub fn make_api_request(
     url: &str,
-    conf: &config::Config,
+    conf: &crate::Config,
 ) -> Result<String, Box<dyn std::error::Error>> {
     println!("Making API request: {}", url.blue());
-    println!("Token: {:?}", conf.get_str("oauth_token")?.as_str());
+    println!("Token: {:?}", conf.oauth_token.as_str());
     let rclient = reqwest::blocking::Client::new();
     let resp = rclient
         .get(url)
         .header(
             reqwest::header::AUTHORIZATION,
-            format!("OAuth {}", conf.get_str("oauth_token")?.as_str()),
+            format!("OAuth {}", conf.oauth_token.as_str()),
         )
         .send()?;
 
@@ -51,9 +51,9 @@ pub fn make_api_request(
     }
 }
 
-pub fn get_info(conf: &config::Config) -> Result<(), Box<dyn std::error::Error>> {
+pub fn get_info(conf: &crate::Config) -> Result<(), Box<dyn std::error::Error>> {
     let disk_object: YaDisk =
-        serde_json::from_str(make_api_request(conf.get_str("url")?.as_str(), conf)?.as_str())?;
+        serde_json::from_str(make_api_request(conf.yandex_disk_api_url.as_str(), &conf)?.as_str())?;
 
     println!("Yandex disk info:\n{:#?}", disk_object);
 
@@ -62,12 +62,12 @@ pub fn get_info(conf: &config::Config) -> Result<(), Box<dyn std::error::Error>>
 
 pub fn get_last(
     url: &str,
-    conf: &config::Config,
+    conf: &crate::Config,
     limit: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let s: String = make_api_request(
         format!("{}/resources/last-uploaded?limit={}", url, limit).as_str(),
-        conf,
+        &conf,
     )?;
     let rl: ResourceList = serde_json::from_str(s.as_str())?;
 
@@ -92,10 +92,10 @@ pub fn get_last(
 
 pub fn get_list(
     url: &str,
-    conf: &config::Config,
+    conf: &crate::Config,
     path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let s: String = make_api_request(format!("{}/resources?path={}", url, path).as_str(), conf)?;
+    let s: String = make_api_request(format!("{}/resources?path={}", url, path).as_str(), &conf)?;
     let r: Resource = serde_json::from_str(s.as_str())?;
 
     println!(
@@ -129,7 +129,7 @@ pub fn get_list(
 
 pub fn upload_file(
     url: &str,
-    conf: &config::Config,
+    conf: &crate::Config,
     local_path: &str,
     remote_path: &str,
     overwrite_flag: bool,
@@ -148,7 +148,7 @@ pub fn upload_file(
             overwrite_flag
         )
         .as_str(),
-        conf,
+        &conf,
     )?;
     let ui: UploadInfo = serde_json::from_str(s.as_str())?;
 
@@ -205,7 +205,7 @@ pub fn delete_remote_file(
 
 pub fn download_file(
     url: &str,
-    conf: &config::Config,
+    conf: &crate::Config,
     path: &str,
     target_path: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -224,7 +224,7 @@ pub fn download_file(
         ]
         .concat()
         .as_str(),
-        conf,
+        &conf,
     )?;
     let di: DownloadInfo = serde_json::from_str(s.as_str())?;
 
@@ -233,7 +233,7 @@ pub fn download_file(
         .get(&di.href)
         .header(
             reqwest::header::AUTHORIZATION,
-            format!("OAuth {}", conf.get_str("oauth_token")?),
+            format!("OAuth {}", conf.oauth_token),
         )
         .send()?;
 

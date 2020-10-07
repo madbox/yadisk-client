@@ -16,15 +16,107 @@ mod cli;
 mod yandex_disk_api;
 use yandex_disk_api::*;
 
-const BASE_API_URL: &str = "https://cloud-api.yandex.net:443/v1/disk";
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-fn trim_newline(s: &mut String) {
-    if s.ends_with('\n') {
-        s.pop();
-        if s.ends_with('\r') {
-            s.pop();
-        }
-    }
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Config {
+    yandex_disk_api_url: String,
+    oauth_token: String,
+    client_id: String, 
+    client_secret: String,
+    mounts: HashMap<String, MountPointConfig>
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct MountPointConfig {
+    local_path: String,
+    remote_path: String,
+}
+
+fn _start_sync(){
+    // 
+    // make md5 for each // separate processor 
+
+    /*  file state:
+        unprocessed(discovered, no md5) -> 
+        md5-processed(awaiting sync, has md5) ->
+        uploaded(synced)
+     */
+
+    /* DB 
+    
+    create sync_state
+        remote_revision
+        local_revision
+
+
+    create files
+        path: string (cannot be null)
+        filename: string (cannot be null)
+        discovered_at: datetime (cannot be null)
+        synced_at: datetime (null - never synced)
+        processed: bool default false (cannot be null)
+        md5sum: string 
+    */
+
+    /* cold-file-indexer
+        drop files table
+        traverse directory tree on local_mount_path,
+            call discover-file for each
+     */
+
+    /* file-indexer
+        open DB
+        find newest(most uptodate discover_time) unprocessed file
+        make md5, save to file record
+        mark for awaiting_sync
+     */
+
+    /* watcher
+        on file event
+            fn discover-file
+                find or create file record in DB (path, discover_time) with current timestamp
+                __if file has changed?__
+                    mark file record as unprocessed (set md5 to null)
+                    set local_revision to 0 (we need to resync!)
+     */
+
+    /* sync checker
+
+        local
+            get local file list (recursive traverse)
+                check sync state for each entry
+        remote
+            get resource list (recursive traverse)
+                check sync state for each entry
+                    get resource info, compare with local file
+                     if local file not exists - add file record, mark for sync
+                     if local file present - compare file revisions(complex)
+                        if remote resource is newer, then mark file record for sync(download)
+                        if remote resource is older, then mark file record for sync(upload)
+     */
+
+    /* syncer
+        find newest(most uptodate discover_time) processed(has md5sum) file
+        call upload_file
+        set synced_ad timestamp
+        save current timestamp as last_sync_datetime
+
+        if no files to upload &
+            if saved last_sync_datetime older then SYNC_INTERVAL
+                get remote_revision
+                if remote_revision > last_remote_revision
+                    ??? get list of files to download ??? last_uploaded ???
+                    download file
+                     - complex. rewrite file only if it not changed since start of download
+                        e.g. file is not in UNPROCESSED
+                        if we should download - check md5 first. may be files already identical
+                            mark file record as synced, set synced_at
+
+        if all file records are synced - set local_revision to remote_revision
+
+     */
 }
 
 fn start_watch(path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -66,57 +158,45 @@ fn start_watch(path: &str) -> Result<(), Box<dyn std::error::Error>> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = cli::init_cli();
 
-    let mut oauth_token = String::new();
-
-    //
-    // Load config
-    //
-
+    let mut conf: Config = Config{
+        yandex_disk_api_url: "https://cloud-api.yandex.net:443/v1/disk".to_string(),
+        oauth_token: "uninitialized".to_string(),
+        client_id: "uninitialized".to_string(),
+        client_secret: "uninitialized".to_string(),
+        mounts: HashMap::new()
+    };
+        
     let mut config_file_name = "ydclient.toml";
-
     if let Some(c) = matches.value_of("config") {
         config_file_name = c;
-        let file = File::open(c);
-        match file {
-            Ok(mut f) => {
-                // Note: I have a file `config.txt` that has contents `file_value`
-                f.read_to_string(&mut oauth_token)
-                    .expect("Error reading value");
-                trim_newline(&mut oauth_token);
-            }
-            Err(_) => println!("Error reading file"),
+    } 
+
+    let file = File::open(config_file_name);
+    match file {
+        Ok(mut f) => {
+            let mut conf_content = String::new();
+            f.read_to_string(&mut conf_content)
+                .expect("Error reading value");
+            conf = toml::from_str(conf_content.as_str())?;
         }
+        Err(_) => println!("Error reading file"),
     }
 
-    let mut settings = config::Config::default();
-    settings
-        // Add in `./Settings.toml`
-        .merge(config::File::with_name(config_file_name))
-        .unwrap()
-        // Add in settings from the environment (with a prefix of APP)
-        // Eg.. `APP_DEBUG=1 ./target/app` would set the `debug` key
-        .merge(config::Environment::with_prefix("YDCLIENT"))
-        .unwrap();
-
-    // Note: this lets us override the config file value with the
-    // cli argument, if provided
+    println!("Real config: {:#?}", conf);
+    
+    // Override config parameters if any of them passed with cli
     if matches.occurrences_of("oauth_token") > 0 {
-        settings.set(
-            "oauth_token",
-            matches.value_of("oauth_token").unwrap().to_string(),
-        )?;
+        conf.oauth_token = matches.value_of("oauth_token").unwrap().to_string()
     }
 
     // FIXME some magic number for fast check
     // Convenient conf check should be implemented
-    if settings.get_str("oauth_token")?.len() < 5 {
-        return Err(String::from("No configuration provided").into());
+    if conf.oauth_token.len() < 5 {
+        return Err(String::from("No OAuth token provided").into());
     }
 
-    println!("OAuth token: {}", settings.get_str("oauth_token")?);
-
-    settings.set("url", matches.value_of("url").unwrap_or(BASE_API_URL))?;
-
+    println!("OAuth token: {}", conf.oauth_token);
+    
     match matches.subcommand() {
         ("list", _) => {
             let path = utf8_percent_encode(
@@ -128,11 +208,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 NON_ALPHANUMERIC,
             )
             .to_string();
-            get_list(settings.get_str("url")?.as_str(), &settings, &path)
+            get_list(conf.yandex_disk_api_url.as_str(), &conf, &path)
         }
         ("last", _) => get_last(
-            settings.get_str("url")?.as_str(),
-            &settings,
+            conf.yandex_disk_api_url.as_str(),
+            &conf,
             matches
                 .subcommand_matches("last")
                 .unwrap()
@@ -142,7 +222,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .parse::<u64>()
                 .unwrap(),
         ),
-        ("info", _) => get_info(&settings),
+        ("info", _) => get_info(&conf),
         ("download", _) => {
             let path = matches
                 .subcommand_matches("download")
@@ -155,8 +235,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .value_of("target")
                 .unwrap_or_default();
             download_file(
-                settings.get_str("url")?.as_str(),
-                &settings,
+                conf.yandex_disk_api_url.as_str(),
+                &conf,
                 &path,
                 Some(&target_path),
             )
@@ -182,8 +262,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 overwrite = true;
             }
             upload_file(
-                settings.get_str("url")?.as_str(),
-                &settings,
+                conf.yandex_disk_api_url.as_str(),
+                &conf,
                 &path,
                 &remote_path,
                 overwrite,
@@ -198,15 +278,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_default();
             let permanently_flag = true;
             delete_remote_file(
-                settings.get_str("url")?.as_str(),
-                oauth_token.as_str(),
+                conf.yandex_disk_api_url.as_str(),
+                conf.oauth_token.as_str(),
                 remote_path,
                 permanently_flag,
             )
         }
         ("login", _) => {
             let ti: yandex_disk_oauth::TokenInfo =
-                yandex_disk_oauth::cli_auth_procedure(&settings)?;
+                yandex_disk_oauth::cli_auth_procedure(&conf)?;
             fs::write("config", ti.access_token)?;
             Ok(())
         }

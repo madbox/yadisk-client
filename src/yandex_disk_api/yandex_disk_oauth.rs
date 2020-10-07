@@ -16,15 +16,15 @@ pub struct TokenInfo {
     pub refresh_token: String,
 }
 
-fn make_reg_user_url(conf: &config::Config) -> String {
+fn make_reg_user_url(conf: &crate::Config) -> String {
     String::from(format!(
         "https://oauth.yandex.ru/authorize?response_type=code&client_id={}",
-        conf.get_str("client_id").unwrap()
+        conf.client_id
     ))
 }
 
 fn get_token(
-    conf: &config::Config,
+    conf: &crate::Config,
     confirmation_code: &str,
 ) -> Result<TokenInfo, Box<dyn std::error::Error>> {
     let rclient = reqwest::blocking::Client::new();
@@ -32,8 +32,8 @@ fn get_token(
         .post(format!("{}/token", YANDEX_OAUTH_URL).as_str())
         //        .header(reqwest::header::AUTHORIZATION, format!("OAuth {}", encode(format!("{}:{}", CLIENT_ID, CLIENT_SECRET))))
         .form(&[
-            ("client_id", conf.get_str("client_id")?.as_str()),
-            ("client_secret", conf.get_str("client_secret")?.as_str()),
+            ("client_id", conf.client_id.as_str()),
+            ("client_secret", conf.client_secret.as_str()),
             ("grant_type", "authorization_code"),
             ("code", confirmation_code),
         ])
@@ -52,13 +52,13 @@ fn get_token(
     }
 }
 
-pub fn cli_auth_procedure(conf: &config::Config) -> Result<TokenInfo, Box<dyn std::error::Error>> {
+pub fn cli_auth_procedure(conf: &crate::Config) -> Result<TokenInfo, Box<dyn std::error::Error>> {
     println!(
         "Please proceed to :{}\nThan enter authorization code here:",
         make_reg_user_url(conf).bright_yellow()
     );
     let auth_code: String = read!("{}\n");
-    let t = get_token(conf, auth_code.as_str())?;
+    let t = get_token(&conf, auth_code.as_str())?;
     println!("{:#?}", t);
     Ok(t)
 }
