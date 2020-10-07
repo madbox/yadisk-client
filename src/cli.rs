@@ -1,6 +1,6 @@
-use clap::{Arg, App, SubCommand};
+use clap::{App, Arg, SubCommand};
 
-pub fn init_cli() -> clap::ArgMatches<'static>{
+pub fn init_cli() -> clap::ArgMatches<'static> {
     App::new("yadisk-client")
                             .version("0.1.0")
                             .author("Mikhail B. <m@mdbx.ru>")
@@ -95,4 +95,3 @@ pub fn init_cli() -> clap::ArgMatches<'static>{
                                     .index(1)))
                                 .get_matches()
 }
-

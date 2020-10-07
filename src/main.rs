@@ -1,15 +1,16 @@
 extern crate clap;
+extern crate colored;
 extern crate mime;
 extern crate serde_json;
-extern crate colored;
-#[macro_use] extern crate text_io;
+#[macro_use]
+extern crate text_io;
 
-use std::fs::File;
-use std::fs;
-use std::io::prelude::*;
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use notify::event::EventKind::*;
-use notify::{Watcher, RecommendedWatcher, RecursiveMode};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use std::fs;
+use std::fs::File;
+use std::io::prelude::*;
 
 mod cli;
 mod yandex_disk_api;
@@ -44,28 +45,25 @@ fn start_watch(path: &str) -> Result<(), Box<dyn std::error::Error>> {
             Ok(event) => match event.kind {
                 Create(ck) => {
                     println!("Create event. {:#?} : {:#?}", ck, event.paths);
-                },
+                }
                 Modify(_) => {
                     println!("Modify event! {:#?}", event.paths);
-                },
+                }
                 Remove(_) => {
                     println!("Remove event! {:#?}", event.paths);
-                },
+                }
                 _ => {
                     println!("Other event! {:#?}", event);
                 }
             },
-            Err(event) => {
-                println!("watch error: {:?}", event)
-            }
+            Err(event) => println!("watch error: {:?}", event),
         }
-    };
+    }
 
     Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-
     let matches = cli::init_cli();
 
     let mut oauth_token = String::new();
@@ -82,103 +80,149 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match file {
             Ok(mut f) => {
                 // Note: I have a file `config.txt` that has contents `file_value`
-                f.read_to_string(&mut oauth_token).expect("Error reading value");
+                f.read_to_string(&mut oauth_token)
+                    .expect("Error reading value");
                 trim_newline(&mut oauth_token);
             }
             Err(_) => println!("Error reading file"),
         }
-    } 
+    }
 
     let mut settings = config::Config::default();
     settings
         // Add in `./Settings.toml`
-        .merge(config::File::with_name(config_file_name)).unwrap()
+        .merge(config::File::with_name(config_file_name))
+        .unwrap()
         // Add in settings from the environment (with a prefix of APP)
         // Eg.. `APP_DEBUG=1 ./target/app` would set the `debug` key
-        .merge(config::Environment::with_prefix("YDCLIENT")).unwrap();
+        .merge(config::Environment::with_prefix("YDCLIENT"))
+        .unwrap();
 
     // Note: this lets us override the config file value with the
     // cli argument, if provided
     if matches.occurrences_of("oauth_token") > 0 {
-        settings.set("oauth_token", matches.value_of("oauth_token").unwrap().to_string())?;
+        settings.set(
+            "oauth_token",
+            matches.value_of("oauth_token").unwrap().to_string(),
+        )?;
     }
 
     // FIXME some magic number for fast check
     // Convenient conf check should be implemented
-    if settings.get_str("oauth_token")?.len() < 5 { 
+    if settings.get_str("oauth_token")?.len() < 5 {
         return Err(String::from("No configuration provided").into());
     }
 
     println!("OAuth token: {}", settings.get_str("oauth_token")?);
 
     settings.set("url", matches.value_of("url").unwrap_or(BASE_API_URL))?;
-        
+
     match matches.subcommand() {
-        ("list", _) => { 
-            let path = utf8_percent_encode(matches.subcommand_matches("list")
-                                                  .unwrap()
-                                                  .value_of("path")
-                                                  .unwrap_or_default(), NON_ALPHANUMERIC
-                                          ).to_string();
+        ("list", _) => {
+            let path = utf8_percent_encode(
+                matches
+                    .subcommand_matches("list")
+                    .unwrap()
+                    .value_of("path")
+                    .unwrap_or_default(),
+                NON_ALPHANUMERIC,
+            )
+            .to_string();
             get_list(settings.get_str("url")?.as_str(), &settings, &path)
-        },
-        ("last", _) => { get_last(settings.get_str("url")?.as_str(), &settings, matches.subcommand_matches("last").unwrap().value_of("limit").unwrap().to_string().parse::<u64>().unwrap()) },
-        ("info", _) => { get_info(&settings) },
+        }
+        ("last", _) => get_last(
+            settings.get_str("url")?.as_str(),
+            &settings,
+            matches
+                .subcommand_matches("last")
+                .unwrap()
+                .value_of("limit")
+                .unwrap()
+                .to_string()
+                .parse::<u64>()
+                .unwrap(),
+        ),
+        ("info", _) => get_info(&settings),
         ("download", _) => {
-            let path = matches.subcommand_matches("download")
-                                                  .unwrap()
-                                                  .value_of("path")
-                                                  .unwrap_or_default();
-            let target_path = matches.subcommand_matches("download")
-                                                  .unwrap()
-                                                  .value_of("target")
-                                                  .unwrap_or_default();
-            download_file(settings.get_str("url")?.as_str(), &settings, &path, Some(&target_path))
-         },
-         ("upload", _) => {
-            let path = matches.subcommand_matches("upload")
-                                                  .unwrap()
-                                                  .value_of("path")
-                                                  .unwrap_or_default();
-            let remote_path = matches.subcommand_matches("upload")
-                                                  .unwrap()
-                                                  .value_of("remote")
-                                                  .unwrap_or_default();
-            let overwrite_str = matches.subcommand_matches("upload")
-                                                  .unwrap()
-                                                  .value_of("overwrite")
-                                                  .unwrap_or_default();
+            let path = matches
+                .subcommand_matches("download")
+                .unwrap()
+                .value_of("path")
+                .unwrap_or_default();
+            let target_path = matches
+                .subcommand_matches("download")
+                .unwrap()
+                .value_of("target")
+                .unwrap_or_default();
+            download_file(
+                settings.get_str("url")?.as_str(),
+                &settings,
+                &path,
+                Some(&target_path),
+            )
+        }
+        ("upload", _) => {
+            let path = matches
+                .subcommand_matches("upload")
+                .unwrap()
+                .value_of("path")
+                .unwrap_or_default();
+            let remote_path = matches
+                .subcommand_matches("upload")
+                .unwrap()
+                .value_of("remote")
+                .unwrap_or_default();
+            let overwrite_str = matches
+                .subcommand_matches("upload")
+                .unwrap()
+                .value_of("overwrite")
+                .unwrap_or_default();
             let mut overwrite = false;
             if overwrite_str.eq_ignore_ascii_case("true") {
                 overwrite = true;
             }
-            upload_file(settings.get_str("url")?.as_str(), &settings, &path, &remote_path, overwrite)
-         },
-         ("delete", _) => {
-            let remote_path = matches.subcommand_matches("delete")
-            // FIXME use '?' error handling here and everywhere in this switch block
-                                                    .unwrap()
-                                                    .value_of("remote")
-                                                    .unwrap_or_default();
+            upload_file(
+                settings.get_str("url")?.as_str(),
+                &settings,
+                &path,
+                &remote_path,
+                overwrite,
+            )
+        }
+        ("delete", _) => {
+            let remote_path = matches
+                .subcommand_matches("delete")
+                // FIXME use '?' error handling here and everywhere in this switch block
+                .unwrap()
+                .value_of("remote")
+                .unwrap_or_default();
             let permanently_flag = true;
-            delete_remote_file(settings.get_str("url")?.as_str(), oauth_token.as_str(), remote_path, permanently_flag)
-         },
-         ("login", _) => {
-            let ti: yandex_disk_oauth::TokenInfo = yandex_disk_oauth::cli_auth_procedure(&settings)?;
+            delete_remote_file(
+                settings.get_str("url")?.as_str(),
+                oauth_token.as_str(),
+                remote_path,
+                permanently_flag,
+            )
+        }
+        ("login", _) => {
+            let ti: yandex_disk_oauth::TokenInfo =
+                yandex_disk_oauth::cli_auth_procedure(&settings)?;
             fs::write("config", ti.access_token)?;
             Ok(())
-         }
-         ("watch", _) => {
+        }
+        ("watch", _) => {
             println!("There will be watch!");
-            let path = matches.subcommand_matches("watch")
-                            .unwrap()
-                            .value_of("path")
-                            .unwrap_or_default();
+            let path = matches
+                .subcommand_matches("watch")
+                .unwrap()
+                .value_of("path")
+                .unwrap_or_default();
             start_watch(path)?;
             Ok(())
-         }
-        _ => {println!("No known command given. Use help please."); Ok (())}
+        }
+        _ => {
+            println!("No known command given. Use help please.");
+            Ok(())
+        }
     }
-
-
 }

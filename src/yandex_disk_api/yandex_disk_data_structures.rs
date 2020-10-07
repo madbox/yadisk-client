@@ -5,13 +5,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct YaUser {
     pub country: String,
     pub login: String,
     pub display_name: String,
-    pub uid: String
+    pub uid: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -24,7 +23,7 @@ pub struct YaDisk {
     pub used_space: u64,
     pub system_folders: HashMap<String, String>,
     pub user: YaUser,
-    pub revision: u64
+    pub revision: u64,
 }
 
 //
@@ -72,7 +71,7 @@ pub struct Resource {
     pub created: String, // (string): <Дата создания>,
     pub modified: String, // (string): <Дата изменения>,
     #[serde(default)]
-    pub comment_ids: serde_json::Value // (CommentIds, optional): <Идентификаторы комментариев>
+    pub comment_ids: serde_json::Value, // (CommentIds, optional): <Идентификаторы комментариев>
 }
 
 impl Default for ResourceList {
@@ -83,7 +82,7 @@ impl Default for ResourceList {
             limit: 0,
             offset: 0,
             path: String::from("_Uninitialized"),
-            total: 0
+            total: 0,
         }
     }
 }
@@ -123,7 +122,7 @@ pub struct CommentIds {
     #[serde(default)]
     pub private_resource: String, // (string, optional): <Идентификатор комментариев для приватных ресурсов.>,
     #[serde(default)]
-    pub public_resource: String // (string, optional): <Идентификатор комментариев для публичных ресурсов.>
+    pub public_resource: String, // (string, optional): <Идентификатор комментариев для публичных ресурсов.>
 }
 
 //
