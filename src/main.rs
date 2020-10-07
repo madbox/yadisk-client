@@ -119,8 +119,8 @@ fn _start_sync(){
      */
 }
 
-fn start_watch(path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Starting watch for: {}", path);
+fn start_watch(/*path: &str, */mounts: &HashMap<String, MountPointConfig>) -> Result<(), Box<dyn std::error::Error>> {
+    //println!("Starting watch for: {}", path);
 
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -130,7 +130,12 @@ fn start_watch(path: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     // Add a path to be watched. All files and directories at that path and
     // below will be monitored for changes.
-    watcher.watch(path, RecursiveMode::Recursive)?;
+    //watcher.watch(path, RecursiveMode::Recursive)?;
+
+    for (k,v) in mounts {
+        println!("Registring watch '{}': at '{}'", k, v.local_path);
+        watcher.watch(&v.local_path, RecursiveMode::Recursive)?;
+    }
 
     for res in rx {
         match res {
@@ -292,12 +297,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         ("watch", _) => {
             println!("There will be watch!");
-            let path = matches
-                .subcommand_matches("watch")
-                .unwrap()
-                .value_of("path")
-                .unwrap_or_default();
-            start_watch(path)?;
+            start_watch(&conf.mounts)?;
             Ok(())
         }
         _ => {
