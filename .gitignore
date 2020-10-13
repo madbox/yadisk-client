@@ -3,3 +3,4 @@
 .history
 *.cfg
 ydclient.toml
+*.sqlite3
