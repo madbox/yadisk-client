@@ -8,6 +8,7 @@ extern crate text_io;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use std::fs;
+use std::fs::metadata;
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -20,10 +21,13 @@ use std::collections::HashMap;
 
 use rusqlite::{params, Connection, Result, types::Null};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration};
 
 use md5::{Md5, Digest};
-use std::io::BufReader;
+
+use colored::*;
+
+use walkdir::{DirEntry, WalkDir};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
@@ -32,6 +36,48 @@ pub struct Config {
     client_id: String, 
     client_secret: String,
     mounts: HashMap<String, MountPointConfig>
+}
+
+impl Config {
+    fn new_enriched_with(config_file_name: &str, matches: &clap::ArgMatches) -> Result<Config, Box<dyn std::error::Error>> {
+        println!("Reading config from {}", &config_file_name.blue());
+
+        let mut conf = Config{
+            yandex_disk_api_url: "https://cloud-api.yandex.net:443/v1/disk".to_string(),
+            oauth_token: "uninitialized".to_string(),
+            client_id: "uninitialized".to_string(),
+            client_secret: "uninitialized".to_string(),
+            mounts: HashMap::new()
+        };
+
+        let file = File::open(config_file_name);
+        match file {
+            Ok(mut f) => {
+                let mut conf_content = String::new();
+                f.read_to_string(&mut conf_content)
+                    .expect("Error reading value");
+                conf = toml::from_str(conf_content.as_str())?;
+            }
+            Err(_) => println!("Error reading file"),
+        }
+    
+        println!("Mount point count: {:#?}", conf.mounts.keys().len());
+        
+        // Override config parameters if any of them passed with cli
+        if matches.occurrences_of("oauth_token") > 0 {
+            conf.oauth_token = matches.value_of("oauth_token").unwrap().to_string()
+        }
+    
+        // FIXME some magic number for fast check
+        // Convenient conf check should be implemented
+        if conf.oauth_token.len() < 5 {
+            return Err(String::from("No OAuth token provided").into());
+        } else {
+            println!("OAuth token provided via config file or cli argument");
+        }
+
+        Ok(conf)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -139,24 +185,23 @@ struct FileMeta {
     synced_at: i64,
     directory: bool,
     md5sum: String,
+    // TODO add 'processing_started_at' to detect stalled or outdated processing procedures
 }
 
 fn init_mount_db(mount_name: &String) -> Result<Connection, Box<dyn std::error::Error>> {
     //FIXME check mount_name format
     let conn = Connection::open(format!("mount_{}.sqlite3", mount_name))?;
 
-    let r = conn.execute(
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS mount_meta (
             id              INTEGER PRIMARY KEY,
             local_revision  INTEGER,
             remote_revision INTEGER
         );",
         params![],
-    );
-
-    println!("create table mount_meta: {:#?}", r);
+    )?;
         
-    let r = conn.execute(
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS file_meta (
             path            VARCHAR NOT NULL PRIMARY KEY,
             filename        VARCHAR NOT NULL,
@@ -167,8 +212,6 @@ fn init_mount_db(mount_name: &String) -> Result<Connection, Box<dyn std::error::
         );",
         params![],
     )?;
-
-    println!("create table mount_meta: {:#?}", r);
         
     match conn.execute(
         "CREATE UNIQUE INDEX idx_file_meta_unique_path 
@@ -179,8 +222,6 @@ fn init_mount_db(mount_name: &String) -> Result<Connection, Box<dyn std::error::
         Err(err) => println!("{}: Warning: failed to create index on file_meta. Error: {:#?}", mount_name, err),
     }
 
-    println!("create unique index on file_meta: {:#?}", r);
-
     conn.execute(
         "INSERT OR IGNORE INTO mount_meta (id, local_revision, remote_revision) VALUES (?1, ?2, ?3)",
         params![1, Null, Null],
@@ -189,28 +230,40 @@ fn init_mount_db(mount_name: &String) -> Result<Connection, Box<dyn std::error::
     Ok(conn)
 }
 
-fn discover_local_file(conn: &Connection, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn discover_local_file(conn: &Connection, path: &str, is_dir: Option<bool>) -> Result<(), Box<dyn std::error::Error>> {
+    // path column is under UNIQUE index
     let r = conn.execute(
     "REPLACE INTO file_meta (path, filename, discovered_at, synced_at, directory, md5sum)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6);
+     VALUES (?1, ?2, datetime('now'), ?3, ?4, ?5);
     ",
-    params![path, "filename", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string(), Null, Null, Null]);
-        
-    println!("write file_meta record result: {:#?}", r);
+    params![
+        path,
+        "some-filename",
+        // set with DB function // SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string(),
+        Null,
+        is_dir,
+        Null,
+    ]);
 
-    Ok(())
+    match r {
+        Ok(_) => {
+            Ok(())
+        },
+        Err(e) => {Err(e.into())}
+    }
 }
 
 // This function will start deferred directory watch
 fn start_mount_watch(mount_name: &String, mount: &MountPointConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let conn = init_mount_db(&mount_name)?;
+    let conn = Connection::open(format!("mount_{}.sqlite3", &mount_name))?;
 
     let (tx, rx) = std::sync::mpsc::channel();
 
     // Automatically select the best implementation for your platform.
     // You can also access each implementation directly e.g. INotifyWatcher.
     let mut watcher: RecommendedWatcher = Watcher::new_immediate(move |res| tx.send(res).unwrap())?;
-
+        
+    println!("Registering directory watcher '{}'", mount_name);
     // Add a path to be watched. All files and directories at that path and
     // below will be monitored for changes.
     watcher.watch(&mount.local_path, RecursiveMode::Recursive)?;
@@ -218,11 +271,19 @@ fn start_mount_watch(mount_name: &String, mount: &MountPointConfig) -> Result<()
     for res in rx {
         match res {
             Ok(event) =>  {
-                println!("{}:Other event! {:#?}", &mount_name, event);
+                println!("{}:FS event! {:#?}", &mount_name, event);
+                let p = event.paths.first().unwrap().to_str().unwrap(); // Is it always first entry? Check it.
+                let md = metadata(&p)?;
                 discover_local_file(
                     &conn,
-                    event.paths.first().unwrap().to_str().unwrap()
+                    &p,
+                    Some(md.is_dir()),
                 )?;
+                let file_or_dir_str = match md.is_dir() {
+                    true => "Directory",
+                    false => "File",
+                };
+                println!("{}: {} marked as unprocessed: {}", &mount_name, &file_or_dir_str, &p);
             },
             Err(event) => println!("watch error: {:?}", event),
         }
@@ -239,13 +300,9 @@ fn process_files(mount_name: &String) -> Result<(), Box<dyn std::error::Error>> 
 
         let conn = Connection::open(format!("mount_{}.sqlite3", mount_name))?;
 
-        let r = conn.execute(
-            "SELECT * FROM file_meta WHERE md5sum IS NULL;",
-            params![],
-        );
-        println!("{}: Select files to process: {:#?}", mount_name, r);
+        // BUG possible here. If we start multiple process_files operations simultaneously, we need some locking system.
 
-        let mut stmt = conn.prepare("SELECT path, filename, discovered_at, synced_at, directory, md5sum FROM file_meta WHERE md5sum IS NULL;")?;
+        let mut stmt = conn.prepare("SELECT path, filename, discovered_at, synced_at, directory, md5sum FROM file_meta WHERE md5sum IS NULL AND directory = 0;")?;
         let filemeta_iter = stmt.query_map(params![], |row| {
             Ok(FileMeta {
                 path: row.get(0)?,
@@ -257,9 +314,10 @@ fn process_files(mount_name: &String) -> Result<(), Box<dyn std::error::Error>> 
             })
         })?;
 
+        let mut processed_file_count = 0;
         for filemeta in filemeta_iter {
-            let fm = filemeta.unwrap();
-            println!("{}: Found file to process {:#?}", mount_name, fm);
+            let fm = filemeta?;
+            println!("{}: Found file to process {:#?}", &mount_name, &fm.path);
 
             let mut hasher = Md5::new();
             hasher.update(fs::read(&fm.path).unwrap());
@@ -271,7 +329,11 @@ fn process_files(mount_name: &String) -> Result<(), Box<dyn std::error::Error>> 
                  WHERE path = ?2",
                 params![format!("{:x}", &md5), fm.path],
             )?;
+
+            processed_file_count += 1;
         }
+
+        println!("{}: Processor cycle ended. Processed: {}", &mount_name, processed_file_count);
     }
 }
 
@@ -293,16 +355,16 @@ fn start_all_watches(mounts: &HashMap<String, MountPointConfig>) -> Result<(), B
                 },
             }
         }));
-
-        // file processor
+        // BUG There can be an error around SQLITE_BUSY, becouse of separate sqlite connections in watcher thread and processor thread
+        // processor threads
         let thread_mount_name = k.clone();
         watch_handlers.push(thread::spawn(move || {
             match process_files(&thread_mount_name) {
                 Ok(_) => {
                     println!("File Processor for {} successfully done", thread_mount_name); "Ok"
                 },
-                Err(_) => {
-                    println!("File Processor for {} was faulty ", thread_mount_name); "Err"
+                Err(e) => {
+                    println!("File Processor for {} was faulty. {:#?}", thread_mount_name, e); "Err"
                 },
             }
         }));
@@ -317,48 +379,70 @@ fn start_all_watches(mounts: &HashMap<String, MountPointConfig>) -> Result<(), B
     Ok(())
 }
 
+fn is_hidden(entry: &DirEntry) -> bool {
+    entry.file_name()
+         .to_str()
+         .map(|s| s.starts_with("."))
+         .unwrap_or(false)
+}
+
+fn start_local_scan(mounts: &HashMap<String, MountPointConfig>) -> Result<(), Box<dyn std::error::Error>> {
+    for (k,v) in mounts {
+        println!("Starting scan '{}': {}", &k.blue(), &v.local_path.blue());
+
+        let mut file_count = 0;
+
+        let conn = Connection::open(format!("mount_{}.sqlite3", &k))?;
+        for entry in WalkDir::new(&v.local_path).into_iter().filter_entry(|e| !is_hidden(e)).filter_map(|e| e.ok() ) {
+            file_count += 1;
+            let file_type_char = if entry.file_type().is_dir() {"d".blue()} else {"f".green()};
+            println!("{:>5}({}): {}", file_count, file_type_char, entry.path().display());
+            discover_local_file(&conn, entry.path().to_str().unwrap(), Some(entry.file_type().is_dir()))?
+        }
+    }
+    Ok(())
+}
+
+fn print_status(mounts: &HashMap<String, MountPointConfig>) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Yandex disk status");
+
+    println!("Mounts:");
+    for (k,_v) in mounts {
+        println!("{}", &k);
+        let conn = Connection::open(format!("mount_{}.sqlite3", &k))?;
+        let mut stmt = conn.prepare("SELECT * FROM
+            (SELECT count(*) FROM file_meta),
+            (SELECT count(*) FROM file_meta WHERE directory = 1),
+            (SELECT count(*) FROM file_meta WHERE directory = 0),
+            (SELECT count(*) FROM file_meta WHERE md5sum IS NULL AND directory = 0);
+        ")?;
+
+        let mut rows = stmt.query(params![]).expect("Failed to execute status DB query");
+        while let Some(row) = rows.next().expect("Failed to get first row of status query") {
+            println!("
+                        Total entries: {:>6}
+                          Directories: {:>6}
+                                Files: {:>6}
+                Files without digiest: {:>6}",
+                row.get_raw(0).as_i64()?,
+                row.get_raw(1).as_i64()?,
+                row.get_raw(2).as_i64()?,
+                row.get_raw(3).as_i64()?,
+            )
+        };
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = cli::init_cli();
-
-    let mut conf: Config = Config{
-        yandex_disk_api_url: "https://cloud-api.yandex.net:443/v1/disk".to_string(),
-        oauth_token: "uninitialized".to_string(),
-        client_id: "uninitialized".to_string(),
-        client_secret: "uninitialized".to_string(),
-        mounts: HashMap::new()
-    };
-        
-    let mut config_file_name = "ydclient.toml";
-    if let Some(c) = matches.value_of("config") {
-        config_file_name = c;
-    } 
-
-    let file = File::open(config_file_name);
-    match file {
-        Ok(mut f) => {
-            let mut conf_content = String::new();
-            f.read_to_string(&mut conf_content)
-                .expect("Error reading value");
-            conf = toml::from_str(conf_content.as_str())?;
-        }
-        Err(_) => println!("Error reading file"),
-    }
-
-    println!("Real config: {:#?}", conf);
+    let conf = Config::new_enriched_with("ydclient.toml", &matches)?;
     
-    // Override config parameters if any of them passed with cli
-    if matches.occurrences_of("oauth_token") > 0 {
-        conf.oauth_token = matches.value_of("oauth_token").unwrap().to_string()
+    for (k,_v) in &conf.mounts {
+        let _conn = init_mount_db(&k);
     }
 
-    // FIXME some magic number for fast check
-    // Convenient conf check should be implemented
-    if conf.oauth_token.len() < 5 {
-        return Err(String::from("No OAuth token provided").into());
-    }
-
-    println!("OAuth token: {}", conf.oauth_token);
-    
     match matches.subcommand() {
         ("list", _) => {
             let path = utf8_percent_encode(
@@ -434,7 +518,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("delete", _) => {
             let remote_path = matches
                 .subcommand_matches("delete")
-                // FIXME use '?' error handling here and everywhere in this switch block
                 .unwrap()
                 .value_of("remote")
                 .unwrap_or_default();
@@ -452,11 +535,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             fs::write("config", ti.access_token)?;
             Ok(())
         }
-        ("watch", _) => {
-            println!("There will be watch!");
-            start_all_watches(&conf.mounts)?;
-            Ok(())
-        }
+        ("watch", _) => { start_all_watches(&conf.mounts) }
+        ("scan", _) => { start_local_scan(&conf.mounts) }
+        ("status", _) => { print_status(&conf.mounts) }
         _ => {
             println!("No known command given. Use help please.");
             Ok(())
