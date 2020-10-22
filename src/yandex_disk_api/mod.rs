@@ -10,11 +10,74 @@ use std::io;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
 use std::fs::File;
+use std::io::prelude::*;
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
 
 mod yandex_disk_data_structures;
 use yandex_disk_data_structures::*;
 
 pub mod yandex_disk_oauth;
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Config {
+    pub yandex_disk_api_url: String,
+    pub oauth_token: String,
+    pub client_id: String, 
+    pub client_secret: String,
+    pub mounts: HashMap<String, MountPointConfig>
+}
+
+impl Config {
+    pub fn new_enriched_with(config_file_name: &str, matches: &clap::ArgMatches) -> Result<Config, Box<dyn std::error::Error>> {
+        println!("Reading config from {}", &config_file_name.blue());
+
+        let mut conf = Config{
+            yandex_disk_api_url: "https://cloud-api.yandex.net:443/v1/disk".to_string(),
+            oauth_token: "uninitialized".to_string(),
+            client_id: "uninitialized".to_string(),
+            client_secret: "uninitialized".to_string(),
+            mounts: HashMap::new()
+        };
+
+        let file = File::open(config_file_name);
+        match file {
+            Ok(mut f) => {
+                let mut conf_content = String::new();
+                f.read_to_string(&mut conf_content)
+                    .expect("Error reading value");
+                conf = toml::from_str(conf_content.as_str())?;
+            }
+            Err(_) => println!("Error reading file"),
+        }
+    
+        println!("Mount point count: {:#?}", conf.mounts.keys().len());
+        
+        // Override config parameters if any of them passed with cli
+        if matches.occurrences_of("oauth_token") > 0 {
+            conf.oauth_token = matches.value_of("oauth_token").unwrap().to_string()
+        }
+    
+        // FIXME some magic number for fast check
+        // Convenient conf check should be implemented
+        if conf.oauth_token.len() < 5 {
+            return Err(String::from("No OAuth token provided").into());
+        } else {
+            println!("OAuth token provided via config file or cli argument");
+        }
+
+        Ok(conf)
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct MountPointConfig {
+    pub local_path: String,
+    pub remote_path: String,
+}
+
 
 pub fn make_api_request(
     url: &str,
