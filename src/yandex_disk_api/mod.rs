@@ -3,13 +3,12 @@ use colored::*;
 use mime::Mime;
 use std::str::FromStr;
 
-use url::Url;
-
 use std::io;
 
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
 use std::fs::File;
+use std::path::Path;
 use std::io::prelude::*;
 
 use serde::{Deserialize, Serialize};
@@ -119,6 +118,18 @@ pub fn get_info(conf: &crate::Config) -> Result<(), Box<dyn std::error::Error>> 
         serde_json::from_str(make_api_request(conf.yandex_disk_api_url.as_str(), &conf)?.as_str())?;
 
     println!("Yandex disk info:\n{:#?}", disk_object);
+
+    Ok(())
+}
+
+pub fn get_resource_info(
+    path: &str,
+    conf: &crate::Config) -> Result<(), Box<dyn std::error::Error>> {
+
+    let res: Resource =
+        serde_json::from_str(make_api_request(format!("{}/resources?path={}", conf.yandex_disk_api_url, path).as_str(), &conf)?.as_str())?;
+
+    println!("Liga:\n{:#?}", res);
 
     Ok(())
 }
@@ -272,23 +283,23 @@ pub fn download_file(
     path: &str,
     target_path: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!(
-        "Attempting to download:\nRemote:{}\nTo:{}",
-        path,
-        target_path.unwrap_or_default()
-    );
+
+    let target = target_path.or(Path::new(path).file_name()
+                                .unwrap_or_default()
+                                .to_str()
+                            ).unwrap();
+
+    println!("Attempting to download:\nRemote:{}\nTo:{}", path, target);
+
     let s: String = make_api_request(
-        [
-            url,
-            "/resources/download?path=",
-            utf8_percent_encode(path, NON_ALPHANUMERIC)
-                .to_string()
-                .as_str(),
-        ]
-        .concat()
-        .as_str(),
+        format!("{}/resources/download?path={}",
+                url,
+                utf8_percent_encode(path, NON_ALPHANUMERIC)
+                   .to_string()
+                   .as_str()).as_str(),
         &conf,
     )?;
+    
     let di: DownloadInfo = serde_json::from_str(s.as_str())?;
 
     let rclient = reqwest::blocking::Client::new();
@@ -305,18 +316,7 @@ pub fn download_file(
             "Download request done. Data size: {}",
             resp.headers().get("content-length").unwrap().to_str()?
         );
-
-        let parsed = Url::parse(&di.href)?;
-        let filename = parsed
-            .query_pairs()
-            .find(|(x, _y)| x == "filename")
-            .unwrap()
-            .1
-            .to_string();
-        let target = target_path.or(Some(filename.as_str())).unwrap();
-
-        println!("Saving as {}", target);
-
+  
         let mut out = File::create(target).expect("failed to create file");
         io::copy(&mut resp, &mut out).expect("failed to copy content");
     } else {

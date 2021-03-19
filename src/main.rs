@@ -306,23 +306,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .parse::<u64>()
                 .unwrap(),
         ),
-        ("info", _) => get_info(&conf),
+        ("info", _) => {
+            let info_matches = matches.subcommand_matches("info").unwrap();
+            if info_matches.is_present("path") {
+                get_resource_info(info_matches.value_of("path").unwrap_or_default(), &conf)
+            } else {
+                get_info(&conf)
+            }
+        }
         ("download", _) => {
-            let path = matches
-                .subcommand_matches("download")
-                .unwrap()
+            let dmatches = matches
+            .subcommand_matches("download").unwrap();
+            let path = dmatches
                 .value_of("path")
-                .unwrap_or_default();
-            let target_path = matches
-                .subcommand_matches("download")
-                .unwrap()
-                .value_of("target")
                 .unwrap_or_default();
             download_file(
                 conf.yandex_disk_api_url.as_str(),
                 &conf,
                 &path,
-                Some(&target_path),
+                dmatches.value_of("target"),
             )
         }
         ("upload", _) => {
